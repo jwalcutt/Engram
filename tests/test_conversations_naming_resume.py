@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from crossmodalrag.conversations.naming import (
     TITLE_MAX_WORDS,

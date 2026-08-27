@@ -136,7 +136,7 @@ def test_prompt_version_change_triggers_reextraction(tmp_path) -> None:
 
 def test_malformed_output_is_graceful(tmp_path) -> None:
     conn = _new_db(tmp_path)
-    sid = _add_source(conn, "note-a", ["alpha"])
+    _add_source(conn, "note-a", ["alpha"])
     provider = StubLLMProvider(output="I could not produce JSON, sorry.")
 
     result = extract_pending_sources(conn, provider)

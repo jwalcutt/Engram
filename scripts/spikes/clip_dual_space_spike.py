@@ -151,7 +151,9 @@ def main() -> None:
             a = ocr_text_first_ranking(conn, q.query_text)
             b = clip.ranked_uris(q.query_text)
             ab = rrf_merge(a, b)
-            a_set.append((a, gold)); b_set.append((b, gold)); ab_set.append((ab, gold))
+            a_set.append((a, gold))
+            b_set.append((b, gold))
+            ab_set.append((ab, gold))
             # diagnostic: CLIP rank of each gold image uri (1-based) if present
             for g in gold:
                 if g in b:

@@ -204,7 +204,7 @@ def test_render_history_caps_long_answers() -> None:
 
     long_answer = "x" * (HISTORY_ANSWER_MAX_CHARS + 500)
     rendered = render_history([ChatTurn("q", long_answer)])
-    assistant_line = [l for l in rendered.splitlines() if l.startswith("Assistant:")][0]
+    assistant_line = [line for line in rendered.splitlines() if line.startswith("Assistant:")][0]
     assert assistant_line.endswith("[…truncated]")
     assert len(assistant_line) < HISTORY_ANSWER_MAX_CHARS + 100
     # Short answers are untouched.

@@ -815,7 +815,7 @@ def test_stream_answer_events_close_from_another_thread_is_clean(tmp_path, monke
     def _close() -> None:
         try:
             events.close()
-        except BaseException as exc:  # noqa: BLE001 - the regression IS "close raised"
+        except BaseException as exc:  # the regression IS "close raised"
             errors.append(exc)
 
     t = threading.Thread(target=_close)

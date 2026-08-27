@@ -24,7 +24,6 @@ from crossmodalrag.embed.provider import (
     get_default_provider,
     require_default_provider,
 )
-from crossmodalrag.embed.provider import get_default_provider
 from crossmodalrag.embed.store import (
     count_embeddings,
     count_node_embeddings,

@@ -14,10 +14,10 @@ try:
 except Exception:  # pragma: no cover - environment without the tesseract binary
     pytest.skip("tesseract binary not installed", allow_module_level=True)
 
-from crossmodalrag.capabilities import MissingModalityBackend
-from crossmodalrag.db import connect, init_db
-from crossmodalrag.ingest import image as image_module
-from crossmodalrag.ingest.image import ingest_images
+from crossmodalrag.capabilities import MissingModalityBackend  # noqa: E402
+from crossmodalrag.db import connect, init_db  # noqa: E402
+from crossmodalrag.ingest import image as image_module  # noqa: E402
+from crossmodalrag.ingest.image import ingest_images  # noqa: E402
 
 DOCUMENTS = (
     Path(__file__).resolve().parent / "fixtures" / "sample_seed" / "vault" / "documents"

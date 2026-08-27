@@ -175,7 +175,13 @@ def create_app():
                     status_code=404, detail=f"No saved conversation with id {conversation_id}."
                 )
             conversation = get_conversation(conn, conversation_id)
-            assert conversation is not None  # just renamed it
+            if conversation is None:
+                # The rename above succeeded, so this only fires if the row went away in
+                # between. Kept as a real branch, not an assert: assertions are stripped
+                # under `python -O`, which would hand None to the contract layer instead.
+                raise HTTPException(
+                    status_code=404, detail=f"No saved conversation with id {conversation_id}."
+                )
             return conversation_to_dict(conn, conversation, include_messages=False)
 
     @app.delete("/conversations/{conversation_id}")
@@ -193,7 +199,9 @@ def create_app():
         return {"deleted": deleted}
 
     @app.post("/chat/stream")
-    def chat_stream(body: dict) -> "StreamingResponse":
+    # No return annotation: `StreamingResponse` is imported in the body (below), so naming it
+    # here would leave an unresolvable annotation. `ask_stream` above does the same.
+    def chat_stream(body: dict):
         """One persisted multi-turn chat turn (the web chat): NDJSON token events, then a
         final `{"type":"answer","data":…, "conversation_id":…}` event. The API's single
         write path — it appends only to the user-owned chat-history tables (see module
