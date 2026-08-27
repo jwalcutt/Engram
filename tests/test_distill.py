@@ -13,7 +13,6 @@ from crossmodalrag.evaluation import (
     distill_gate_fires,
     distilled_compression_ratio,
     run_distilled_eval,
-    run_eval,
 )
 from crossmodalrag.memory.distill import (
     build_distilled,
@@ -118,7 +117,7 @@ def test_core_evidence_is_real_subset_sized_to_ratio(conn):
 
 def test_distilled_drilldown_is_subset_of_full(conn):
     members = [_add_event_with_chunk(conn, f"beta topic chunk {i}") for i in range(4)]
-    cid = _make_concept(conn, "beta concept", [e for e, _, _ in members])
+    _make_concept(conn, "beta concept", [e for e, _, _ in members])
     embed_pending_chunks(conn, StubEmbedProvider())
     build_distilled(conn, StubEmbedProvider(), StubLLMProvider(), target_ratio=0.5)
 

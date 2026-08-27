@@ -66,7 +66,7 @@ def test_retrieve_nodes_returns_target_level_ranked(conn) -> None:
     e1, c1 = _event(conn, "parser bounds fix", "/v/a.md")
     e2, c2 = _event(conn, "cooking pasta recipe", "/v/b.md")
     cParser = _concept(conn, "parser bounds work", [e1])
-    cCook = _concept(conn, "cooking recipes", [e2])
+    _concept(conn, "cooking recipes", [e2])  # distractor: must not outrank the parser concept
     embed_pending_nodes(conn, StubEmbedProvider(), level=3, node_type="concept")
 
     hits = retrieve_nodes(conn, "parser bounds", level="concept", top_k=5, provider=StubEmbedProvider())
@@ -100,7 +100,7 @@ def test_centrality_breaks_ties(conn) -> None:
 def test_drilldown_recovers_evidence(conn) -> None:
     e1, c1 = _event(conn, "parser bounds fix", "/v/a.md")
     e2, c2 = _event(conn, "parser bounds check", "/v/b.md")
-    cParser = _concept(conn, "parser bounds work", [e1, e2])
+    _concept(conn, "parser bounds work", [e1, e2])
     embed_pending_nodes(conn, StubEmbedProvider(), level=3, node_type="concept")
 
     hits = retrieve_nodes(conn, "parser bounds", level="concept", provider=StubEmbedProvider())

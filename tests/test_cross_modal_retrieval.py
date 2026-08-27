@@ -6,7 +6,6 @@ import pytest
 
 from crossmodalrag.db import connect, init_db
 from crossmodalrag.modality import (
-    MODALITY_OCR,
     MODALITY_PDF_PAGE,
     build_chunk_metadata,
     parse_locator,

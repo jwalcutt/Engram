@@ -181,7 +181,7 @@ def run_distilled_eval(
     query_prefix: str | None = None,
     profile: str = DEFAULT_PROFILE,
     level: str = "concept",
-    now=None,  # noqa: ARG001 - accepted for run_eval symmetry; distilled recency uses wall clock
+    now=None,  # accepted for run_eval symmetry; distilled recency uses the wall clock
 ) -> EvalSummary:
     """Retrieval eval through the *distilled* stand-ins: rank distilled nodes, drill to their
     core-evidence subset, score against the gold sources. Same metric as ``run_eval`` so the two are

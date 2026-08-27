@@ -7,10 +7,10 @@ import pytest
 
 pypdf = pytest.importorskip("pypdf")  # PDF ingestion genuinely needs the [pdf] extra
 
-from crossmodalrag.capabilities import MissingModalityBackend
-from crossmodalrag.db import connect, init_db
-from crossmodalrag.ingest import pdf as pdf_module
-from crossmodalrag.ingest.pdf import ingest_pdf
+from crossmodalrag.capabilities import MissingModalityBackend  # noqa: E402
+from crossmodalrag.db import connect, init_db  # noqa: E402
+from crossmodalrag.ingest import pdf as pdf_module  # noqa: E402
+from crossmodalrag.ingest.pdf import ingest_pdf  # noqa: E402
 
 FIXTURE_PDF = (
     Path(__file__).resolve().parent

@@ -22,6 +22,8 @@ image-embeddings = ["fastembed>=0.3", "numpy>=1.24"]
 # Local HTTP API (`mem serve`): the boundary the web UI calls.
 # Opt-in so the core stays dependency-free; `httpx` powers FastAPI's TestClient.
 ui = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
+# Tooling only; never imported by the library. `ruff check` reads the [tool.ruff] section below.
+dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
 mem = "crossmodalrag.cli:main"
@@ -35,3 +37,19 @@ where = ["src"]
 [tool.setuptools.package-data]
 # Ship the built web UI (served by `mem serve` with the [ui] extra).
 "crossmodalrag.api" = ["static/**/*"]
+
+[tool.ruff]
+# Pinned so `ruff check` reports the same set on every machine and across ruff releases.
+target-version = "py311"
+line-length = 110
+extend-exclude = ["web", "src/crossmodalrag/api/static"]
+
+[tool.ruff.lint]
+# Correctness and dead code, not style. F catches undefined names, unused imports and
+# redefinitions; E4/E7/E9 cover import placement, statement-level mistakes and syntax errors;
+# RUF100 keeps `# noqa` directives honest by flagging ones whose rule no longer fires.
+# Deliberately excluded: the flake8-bandit `S` rules, whose only hits here are the parameterised
+# variable-length `IN (?, ?, …)` clauses that S608 cannot distinguish from string-built SQL, and
+# the stylistic families (I, UP, SIM, RUF beyond RUF100), which would rewrite working code for
+# no correctness gain.
+select = ["E4", "E7", "E9", "F", "RUF100"]

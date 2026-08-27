@@ -351,7 +351,8 @@ def ping_ollama() -> bool:
     url = f"{get_llm_base_url()}/api/tags"
     timeout = min(get_llm_timeout(), 2.0)
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 - localhost only
+        # urlopen targets the locally configured Ollama base URL, never user input.
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
             return 200 <= resp.status < 300
     except Exception:
         return False

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from crossmodalrag.db import connect, init_db
 from crossmodalrag.ingest.notes import _parse_note_date, ingest_notes

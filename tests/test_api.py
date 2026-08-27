@@ -255,7 +255,6 @@ def _chat_events(client, body):
 @pytest.fixture
 def chat_env(built_db, monkeypatch):
     import crossmodalrag.service as svc
-    import crossmodalrag.conversations.recorder as recorder_mod
 
     monkeypatch.setenv("CMRAG_MIN_EVIDENCE_SCORE", "0.0")
     monkeypatch.delenv("CMRAG_SAVE_HISTORY", raising=False)
@@ -375,3 +374,42 @@ def test_rename_conversation_endpoint_errors(client, chat_env):
     cid = _chat_events(client, {"q": "parser bounds fix?"})[-1]["conversation_id"]
     assert client.patch(f"/conversations/{cid}", json={}).status_code == 400
     assert client.patch(f"/conversations/{cid}", json={"title": "   "}).status_code == 400
+
+
+def test_rename_conversation_404_when_row_disappears_after_update(client, chat_env, monkeypatch):
+    """A conversation that vanishes between the UPDATE and the read-back yields 404.
+
+    The rename handler re-reads the row to build its response. A concurrent delete, or an
+    interpreter running with assertions stripped (where an ``assert`` guard is never compiled),
+    leaves that read returning None. The handler has to answer 404 rather than pass None into
+    the contract layer, which would surface as an opaque AttributeError.
+    """
+    cid = _chat_events(client, {"q": "parser bounds fix?"})[-1]["conversation_id"]
+
+    import crossmodalrag.conversations.store as store
+
+    monkeypatch.setattr(store, "get_conversation", lambda conn, conversation_id: None)
+    response = client.patch(f"/conversations/{cid}", json={"title": "Parser deep dive"})
+    assert response.status_code == 404
+    assert str(cid) in response.json()["detail"]
+
+
+def test_route_annotations_resolve(built_db):
+    """Every handler annotation must resolve against the module namespace.
+
+    ``from __future__ import annotations`` keeps annotations as strings, so a handler annotated
+    with a name imported only inside its own body still parses and still serves traffic.
+    Anything that later reads those hints (``typing.get_type_hints``, schema generation, a docs
+    build) raises NameError. This pins the handlers to names that exist at module level.
+    """
+    import typing
+
+    app = create_app()
+    checked = 0
+    for route in app.routes:
+        endpoint = getattr(route, "endpoint", None)
+        if endpoint is None or getattr(endpoint, "__module__", None) != create_app.__module__:
+            continue
+        typing.get_type_hints(endpoint)
+        checked += 1
+    assert checked > 10  # guards against the loop silently matching nothing
