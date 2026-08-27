@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# A superseded run tells you nothing useful, so cancel it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the floor declared by requires-python (stdlib tomllib).
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # The [ocr] extra binds to this binary. Without it the OCR tests skip
+      # rather than fail, which would quietly shrink coverage.
+      - name: Install tesseract
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr
+
+      # [dev] carries pytest, ruff and numpy. fastembed and onnxruntime stay out:
+      # the embedding tests use a deterministic stub, so the heavy wheels buy nothing.
+      - name: Install package and test extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[ui,pdf,ocr,dev]"
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Test
+        run: pytest -q
+
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # DOMPurify is the only sanitization boundary between generated answers and
+      # the DOM, so a new advisory against it should break the build rather than
+      # wait to be noticed.
+      - name: Audit dependencies
+        run: npm audit --audit-level=moderate
+
+      - name: Test
+        run: npm test
+
+      # `npm run build` is `tsc -b && vite build`, so this type-checks too.
+      - name: Build
+        run: npm run build

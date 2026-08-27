@@ -22,8 +22,10 @@ image-embeddings = ["fastembed>=0.3", "numpy>=1.24"]
 # Local HTTP API (`mem serve`): the boundary the web UI calls.
 # Opt-in so the core stays dependency-free; `httpx` powers FastAPI's TestClient.
 ui = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
-# Tooling only; never imported by the library. `ruff check` reads the [tool.ruff] section below.
-dev = ["pytest>=8", "ruff>=0.6"]
+# Tooling and test-only. `ruff check` reads the [tool.ruff] section below. `numpy` is here
+# because parts of the suite import it unguarded, so it is needed to run the tests even
+# though the library treats it as an [embeddings] concern.
+dev = ["pytest>=8", "ruff>=0.6", "numpy>=1.24"]
 
 [project.scripts]
 mem = "crossmodalrag.cli:main"
