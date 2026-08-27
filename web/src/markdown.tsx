@@ -88,6 +88,14 @@ function domToReact(
 export function AnswerMarkdown({ text, onCite }: { text: string; onCite: (id: string) => void }) {
   const nodes = useMemo(() => {
     const raw = marked.parse(text) as string;
+    // Two allowlists and nothing else, on purpose. Most published DOMPurify
+    // bypasses need an option that is absent here: IN_PLACE returns a detached
+    // subtree that stays executable, CUSTOM_ELEMENT_HANDLING lets custom
+    // elements skip afterSanitizeElements, and hooks can hand back nodes the
+    // sanitizer already cleared. Adding any of them, or widening ALLOWED_TAGS
+    // to a script-bearing or resource-loading tag, turns advisories that do not
+    // currently apply to this call site into live vulnerabilities.
+    // `markdown.test.tsx` pins this config; change it there first.
     const clean = DOMPurify.sanitize(raw, { ALLOWED_TAGS, ALLOWED_ATTR });
     const doc = new DOMParser().parseFromString(clean, "text/html");
     return Array.from(doc.body.childNodes).map((n, i) => domToReact(n, onCite, false, i));
