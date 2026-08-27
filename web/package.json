@@ -14,7 +14,7 @@
     "@fontsource-variable/fraunces": "^5.0.0",
     "@fontsource-variable/hanken-grotesk": "^5.0.0",
     "@fontsource-variable/jetbrains-mono": "^5.0.0",
-    "dompurify": "^3.4.11",
+    "dompurify": "^3.4.14",
     "marked": "^18.0.5",
     "motion": "^11.11.0",
     "react": "^18.3.1",
