@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 
 // The local API endpoints the UI consumes (proxied to `mem serve` during `npm run dev`).
 const API_ROUTES = [
-  "/health", "/ask", "/concepts", "/timeline", "/memory-stats",
+  "/health", "/ask", "/chat", "/concepts", "/timeline", "/memory-stats",
   "/forgetting", "/recall", "/drift", "/distill", "/usage", "/conversations",
 ];
 
