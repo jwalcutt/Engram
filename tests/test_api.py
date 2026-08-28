@@ -65,7 +65,10 @@ def built_db(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(built_db):
-    return TestClient(create_app())
+    # `base_url` matters: the API rejects any Host that is not a loopback name (the
+    # DNS-rebinding guard in `api/guard.py`), and TestClient otherwise sends `testserver`.
+    # Guard-specific coverage lives in tests/test_api_guard.py.
+    return TestClient(create_app(), base_url="http://127.0.0.1:8765")
 
 
 # --- endpoint contracts -------------------------------------------------------
@@ -219,7 +222,7 @@ def test_api_matches_cli_concepts(client, built_db, monkeypatch, capsys):
 def test_serve_cmd_translates_missing_backend(monkeypatch):
     import crossmodalrag.api as api
 
-    def _boom():
+    def _boom(**kwargs):
         raise MissingUIBackend("need the [ui] extra")
 
     monkeypatch.setattr(api, "create_app", _boom)

@@ -486,6 +486,18 @@ with `mem history --clear`. The web console is served at `/`, and interactive AP
 `/docs`. Use `--host` or `--port` to change the bind; binding to a non-loopback `--host` exposes the
 unauthenticated API on your network and is warned against.
 
+Loopback with no auth is safe against the network but not against the browser, so the API refuses
+two classes of request before they reach a handler. It answers only to a loopback `Host`
+(`localhost`, `127.0.0.1`, `::1`, any port), which blocks DNS rebinding: without that check, a name
+the attacker controls that resolves to `127.0.0.1` would make their page same-origin with your
+memory store and able to read the replies. It also refuses cross-site browser requests, identified
+by `Sec-Fetch-Site`, which blocks the drive-by that no CORS policy can stop: `<img src>` and
+`fetch(…, {mode: 'no-cors'})` reach a loopback service whatever the response headers say, and each
+one spends a local inference run on someone else's query. Clicking a link to the console still
+works, and curl, scripts and the CLI send no `Sec-Fetch-*` headers and are unaffected. Set
+`CMRAG_API_ALLOWED_HOSTS` to the names you will reach it by when you deliberately bind
+non-loopback; refused requests get a 403 explaining which check fired.
+
 `/ask/stream` is the streaming variant of `/ask`: NDJSON events (`{"type":"token","text":…}` per
 generated fragment), then one final `{"type":"answer","data":…}` carrying the exact `/ask` payload.
 Citations are validated on the full output, and the final event always arrives, including on

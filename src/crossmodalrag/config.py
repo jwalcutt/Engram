@@ -149,6 +149,18 @@ def save_history_enabled() -> bool:
     return os.getenv("CMRAG_SAVE_HISTORY", "on").strip().lower() not in {"off", "0", "false", "no"}
 
 
+def get_api_allowed_hosts() -> list[str]:
+    """Extra hostnames the local API (`mem serve`) will answer to, beyond loopback.
+
+    The API rejects any request whose `Host` is not `localhost`, `127.0.0.1` or `::1`, which is
+    what stops a DNS-rebinding page from becoming same-origin with the loopback service. Binding
+    a non-loopback `--host` needs the names you will actually reach it by:
+    `CMRAG_API_ALLOWED_HOSTS=engram.lan,192.168.1.5` (comma-separated; `*` disables the check).
+    """
+    raw = os.getenv("CMRAG_API_ALLOWED_HOSTS", "").strip()
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
 def get_drift_window_days() -> float:
     """Window length (days) for concept-drift snapshots. Default 30."""
     raw = os.getenv("CMRAG_DRIFT_WINDOW_DAYS", "30").strip()
