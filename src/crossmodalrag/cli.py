@@ -1392,16 +1392,26 @@ def serve_cmd(host: str = "127.0.0.1", port: int = 8765) -> None:
 
     from crossmodalrag.api import MissingUIBackend, create_app
 
+    loopback = host in ("127.0.0.1", "localhost", "::1")
+    # The API rejects any request whose Host header is not a loopback name (DNS-rebinding
+    # guard), so a deliberate non-loopback bind has to declare the address it advertises.
+    # Wildcard binds resolve to no single name, hence the CMRAG_API_ALLOWED_HOSTS pointer.
     try:
-        app = create_app()
+        app = create_app(allowed_hosts=[] if loopback else [host])
     except MissingUIBackend as exc:
         raise CLIError(str(exc)) from exc
 
-    if host not in ("127.0.0.1", "localhost", "::1"):
+    if not loopback:
         print(
             f"WARNING: binding to {host} exposes the unauthenticated, read-only API beyond localhost.",
             file=sys.stderr,
         )
+        if host in ("0.0.0.0", "::"):
+            print(
+                "         A wildcard bind answers on names this process cannot know: list them in "
+                "CMRAG_API_ALLOWED_HOSTS or requests will be refused with 403.",
+                file=sys.stderr,
+            )
     print(f"Serving the Engram local API on http://{host}:{port}. Press Ctrl-C to stop.")
     uvicorn.run(app, host=host, port=port, log_level="info")
 

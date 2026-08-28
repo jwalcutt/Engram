@@ -13,6 +13,7 @@ Requires the opt-in ``[ui]`` extra; the module imports without it, and ``create_
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,8 +40,12 @@ def _conn():
         conn.close()
 
 
-def create_app():
-    """Build the FastAPI app. Raises ``MissingUIBackend`` if the ``[ui]`` extra is not installed."""
+def create_app(*, allowed_hosts: Sequence[str] | None = None):
+    """Build the FastAPI app. Raises ``MissingUIBackend`` if the ``[ui]`` extra is not installed.
+
+    ``allowed_hosts`` names additional hostnames the ``Host`` guard accepts, on top of loopback
+    and ``CMRAG_API_ALLOWED_HOSTS`` — `mem serve` passes the address it was told to bind.
+    """
     try:
         from fastapi import FastAPI, HTTPException, Query
     except ModuleNotFoundError as exc:  # pragma: no cover - exercised via monkeypatch in tests
@@ -78,6 +83,18 @@ def create_app():
         title="Engram local API",
         version="1",
         description="Read-only access to the local memory engine. Localhost-only; no auth.",
+    )
+
+    # Loopback with no auth means the browser, not the network, is the attacker: see
+    # `api/guard.py` for why `Host` and `Sec-Fetch-Site` are the two headers that matter.
+    # Added first so it wraps everything, the static UI mount included, and rejects before
+    # routing — a cross-site `/ask` must not cost a local inference run.
+    from crossmodalrag.api.guard import LOOPBACK_HOSTNAMES, LocalOriginGuard
+    from crossmodalrag.config import get_api_allowed_hosts
+
+    app.add_middleware(
+        LocalOriginGuard,
+        allowed_hosts=[*LOOPBACK_HOSTNAMES, *get_api_allowed_hosts(), *(allowed_hosts or [])],
     )
 
     def _levels(level: str):
