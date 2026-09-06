@@ -375,6 +375,7 @@ checks for measuring no regression.
 - `mem backup [<dest>]` (write a consistent single-file copy of the local DB; WAL-safe)
 - `mem restore <src> [--force]` (replace the local DB with a backup; destructive, so `--force` is required to overwrite an existing DB)
 - `mem serve [--host 127.0.0.1] [--port 8765]` (local web console + HTTP API serving the JSON contracts; requires the `[ui]` extra; localhost-only by default)
+- `mem mcp [--db PATH]` (serve the read views to an AI assistant as Model Context Protocol tools over stdio; requires the `[mcp]` extra; no network listener)
 - `mem seed-sample [--workspace-dir PATH] [--force]`
 - `mem ingest-notes [<vault_path> ...]` (falls back to `.env` `OBSIDIAN_VAULT_PATH_*`)
 - `mem ingest-git [<repo_path> ...] [--max-commits N]` (falls back to `.env` `REPO_PATH_*`)
@@ -451,7 +452,8 @@ shapes stay backward-compatible, and changes only *add* keys, never renaming or 
 Every contract that returns memory items carries stable identifiers (`node_id`) and provenance
 (`evidence_source_uris`, or evidence ids plus L0 locators) so a consumer can drill back down to the
 source. The library owns the shapes (the `*_to_dict`, `list_*`, and `memory_stats` helpers), and
-`tests/test_json_contracts.py` pins them, so the CLI, API, and UI render exactly the same payloads.
+`tests/test_json_contracts.py` pins them, so the CLI, API, UI, and MCP tools render exactly the same
+payloads.
 
 ### Web UI and local API (`mem serve`)
 
@@ -512,6 +514,53 @@ curl -sN "localhost:8765/ask/stream?q=why+did+I+change+the+parser"   # NDJSON to
 The web console is a React app under `web/`, built to `src/crossmodalrag/api/static/` (committed, so
 `mem serve` needs no Node). To develop it: `cd web && npm install && npm run dev` (proxies to a running
 `mem serve`); `npm run build` refreshes the shipped bundle. See `web/README.md`.
+
+### MCP server for AI assistants (`mem mcp`)
+
+`mem mcp` lets an AI assistant query your memory store directly. It serves the read views as
+Model Context Protocol tools over the process's stdin and stdout, so Claude Code, Claude Desktop,
+or any other MCP client can ground its answers in your notes, commits, PDFs, and images. There is
+no network listener, no auth to configure, and nothing leaves the machine. It requires the opt-in
+`[mcp]` extra (`pip install -e ".[mcp]"`, adds the official `mcp` SDK); without it, `mem mcp` exits
+with an install hint.
+
+```bash
+pip install -e ".[mcp]"
+claude mcp add engram -- mem mcp --db /absolute/path/to/data/memory.db   # Claude Code
+```
+
+For Claude Desktop, add the same command to `claude_desktop_config.json` (use the absolute path of
+the `mem` binary in your virtualenv):
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "/absolute/path/to/.venv/bin/mem",
+      "args": ["mcp", "--db", "/absolute/path/to/data/memory.db"],
+      "env": {"CMRAG_LLM_MODEL": "gemma4"}
+    }
+  }
+}
+```
+
+Pass `--db` (or set `CMRAG_DB_PATH` in the client's `env`). The client chooses the server's
+working directory, and Claude Desktop uses `/`, so neither `./data/memory.db` nor a project `.env`
+resolves the way they do at your shell. Any other setting you rely on (`CMRAG_LLM_MODEL`,
+`CMRAG_LLM_BASE_URL`, a `CMRAG_CONFIG` path) goes in that `env` block for the same reason. A
+database that does not exist is refused with a message naming the path rather than created empty.
+
+The tools are `ask`, `concepts`, `timeline`, `forgetting`, `recall`, `history`, `conversation`
+(one saved conversation by id), and `status` (the `mem doctor` report). Each returns exactly the
+corresponding `--json` payload as structured content, so every `ask` evidence item carries
+`evidence_id`, `source_uri`, `locator` (`spec.pdf p.4`, `repo@sha`), and `chunk_id`, and an
+abstention is reported as `abstained: true` with its reason. Every tool is marked read-only. `ask`
+never records usage. The one write is `recall`'s card cache (`recall_cards`), the same derived
+cache `mem recall` and `GET /recall` fill; it never touches ingested or chat-history data. `ask`
+with `use_llm` on calls the local Ollama model and can take up to `CMRAG_LLM_TIMEOUT` seconds;
+`use_llm: false` returns the ranked evidence without synthesis, needs no model, and is the fast
+path. Bad arguments (an unknown level or profile) are rejected by the tool schema. Logs go to
+stderr; stdout is the protocol channel.
 
 ## Hierarchical Memory (experimental)
 

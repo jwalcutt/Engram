@@ -22,6 +22,11 @@ image-embeddings = ["fastembed>=0.3", "numpy>=1.24"]
 # Local HTTP API (`mem serve`): the boundary the web UI calls.
 # Opt-in so the core stays dependency-free; `httpx` powers FastAPI's TestClient.
 ui = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
+# Local MCP server (`mem mcp`): the read-only tools an AI assistant calls over stdio. No network
+# listener. Opt-in because the SDK brings pydantic/starlette/anyio with it. The SDK's starlette
+# floor is unbounded, so install it together with [ui] (or `pip install -U fastapi`) in an
+# environment that already holds an older FastAPI.
+mcp = ["mcp>=2,<3"]
 # Tooling and test-only. `ruff check` reads the [tool.ruff] section below. `numpy` is here
 # because parts of the suite import it unguarded, so it is needed to run the tests even
 # though the library treats it as an [embeddings] concern.

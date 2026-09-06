@@ -14,7 +14,6 @@ Requires the opt-in ``[ui]`` extra; the module imports without it, and ``create_
 from __future__ import annotations
 
 from collections.abc import Sequence
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,19 +24,6 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 class MissingUIBackend(RuntimeError):
     """Raised when the local API is requested without the ``[ui]`` extra installed."""
-
-
-@contextmanager
-def _conn():
-    from crossmodalrag.config import get_db_path
-    from crossmodalrag.db import connect, init_db
-
-    conn = connect(get_db_path())
-    try:
-        init_db(conn)
-        yield conn
-    finally:
-        conn.close()
 
 
 def create_app(*, allowed_hosts: Sequence[str] | None = None):
@@ -55,26 +41,23 @@ def create_app(*, allowed_hosts: Sequence[str] | None = None):
 
     from crossmodalrag.config import get_usage_halflife_days
     from crossmodalrag.evaluation import distilled_compression_ratio
-    from crossmodalrag.memory.concepts import list_concept_views
     from crossmodalrag.memory.distill import distilled_summaries, distilled_summary_to_dict
     from crossmodalrag.memory.drift import concept_drift_summaries, drift_summary_to_dict
-    from crossmodalrag.memory.episodes import list_episode_timeline
-    from crossmodalrag.memory.forgetting import (
-        LEVEL_NAMES,
-        compute_forgetting_risk,
-        forgetting_risk_to_dict,
-    )
     from crossmodalrag.memory.integrity import memory_stats
-    from crossmodalrag.memory.recall import generate_recall_cards, recall_card_to_dict
     from crossmodalrag.service import (
         ConversationNotFound,
         answer_payload,
         chat_stream_events,
+        concepts_payload,
         conversation_payload,
         conversations_payload,
+        forgetting_payload,
         health_report,
+        open_store,
+        recall_payload,
         retrieve_for_answer,
         stream_answer_events,
+        timeline_payload,
     )
     from crossmodalrag.usage.store import usage_summaries
     from crossmodalrag.usage.strength import usage_summary_to_dict
@@ -97,12 +80,6 @@ def create_app(*, allowed_hosts: Sequence[str] | None = None):
         allowed_hosts=[*LOOPBACK_HOSTNAMES, *get_api_allowed_hosts(), *(allowed_hosts or [])],
     )
 
-    def _levels(level: str):
-        levels = LEVEL_NAMES.get(level)
-        if levels is None:
-            raise HTTPException(status_code=400, detail=f"Unknown level '{level}'.")
-        return levels
-
     def _now() -> datetime:
         return datetime.now(timezone.utc)
 
@@ -119,7 +96,7 @@ def create_app(*, allowed_hosts: Sequence[str] | None = None):
         modality: list[str] | None = Query(None),
         use_llm: bool = True,
     ) -> dict:
-        with _conn() as conn:
+        with open_store() as conn:
             return answer_payload(
                 conn, query=q, top_k=top_k, profile=profile, level=level,
                 modalities=modality, use_llm=use_llm,
@@ -149,7 +126,7 @@ def create_app(*, allowed_hosts: Sequence[str] | None = None):
         # server may iterate/close it on a different worker thread (e.g. on client
         # disconnect), where a thread-bound connection dies with ProgrammingError.
         start = time.monotonic()
-        with _conn() as conn:
+        with open_store() as conn:
             hits, matched_nodes = retrieve_for_answer(
                 conn, query=q, top_k=top_k, profile=profile, level=level, modalities=modality
             )
@@ -164,12 +141,12 @@ def create_app(*, allowed_hosts: Sequence[str] | None = None):
 
     @app.get("/conversations")
     def conversations(top: int | None = None) -> dict:
-        with _conn() as conn:
+        with open_store() as conn:
             return conversations_payload(conn, top=top)
 
     @app.get("/conversations/{conversation_id}")
     def conversation(conversation_id: int) -> dict:
-        with _conn() as conn:
+        with open_store() as conn:
             try:
                 return conversation_payload(conn, conversation_id)
             except ConversationNotFound as exc:
@@ -186,7 +163,7 @@ def create_app(*, allowed_hosts: Sequence[str] | None = None):
         if not title:
             raise HTTPException(status_code=400, detail="Missing or empty 'title'.")
         title = title[:200]
-        with _conn() as conn:
+        with open_store() as conn:
             if not rename_conversation(conn, conversation_id, title=title):
                 raise HTTPException(
                     status_code=404, detail=f"No saved conversation with id {conversation_id}."
@@ -207,7 +184,7 @@ def create_app(*, allowed_hosts: Sequence[str] | None = None):
         One of the API's two explicit write paths — see the module docstring."""
         from crossmodalrag.conversations.store import clear_conversations
 
-        with _conn() as conn:
+        with open_store() as conn:
             deleted = clear_conversations(conn, conversation_id=conversation_id)
         if deleted == 0:
             raise HTTPException(
@@ -256,50 +233,44 @@ def create_app(*, allowed_hosts: Sequence[str] | None = None):
 
     @app.get("/concepts")
     def concepts(top: int = 20) -> dict:
-        with _conn() as conn:
-            return {"concepts": list_concept_views(conn, top=top)}
+        with open_store() as conn:
+            return concepts_payload(conn, top=top)
 
     @app.get("/timeline")
     def timeline(limit: int = 50) -> dict:
-        with _conn() as conn:
-            return {"timeline": list_episode_timeline(conn, limit=limit)}
+        with open_store() as conn:
+            return timeline_payload(conn, limit=limit)
 
     @app.get("/memory-stats")
     def memory_stats_route() -> dict:
-        with _conn() as conn:
+        with open_store() as conn:
             return memory_stats(conn)
 
     @app.get("/forgetting")
     def forgetting(level: str = "concept", top: int = 10, min_support: int = 1) -> dict:
-        with _conn() as conn:
-            items = compute_forgetting_risk(
-                conn, now=_now(), halflife_days=get_usage_halflife_days(),
-                levels=_levels(level), min_support=min_support, top=top,
-            )
-            return {"level": level, "forgetting": [forgetting_risk_to_dict(i) for i in items]}
+        with open_store() as conn:
+            try:
+                return forgetting_payload(conn, level=level, top=top, min_support=min_support)
+            except ValueError as exc:  # unknown level
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/recall")
     def recall(level: str = "concept", top: int = 10, min_support: int = 1) -> dict:
-        from crossmodalrag.config import get_extract_model
-        from crossmodalrag.generate.provider import get_default_llm_provider
-
-        with _conn() as conn:
-            provider = get_default_llm_provider(get_extract_model())
-            cards = generate_recall_cards(
-                conn, provider, now=_now(), halflife_days=get_usage_halflife_days(),
-                levels=_levels(level), top=top, min_support=min_support,
-            )
-            return {"level": level, "recall": [recall_card_to_dict(c) for c in cards]}
+        with open_store() as conn:
+            try:
+                return recall_payload(conn, level=level, top=top, min_support=min_support)
+            except ValueError as exc:  # unknown level
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/drift")
     def drift(top: int = 10, min_support: int = 1) -> dict:
-        with _conn() as conn:
+        with open_store() as conn:
             items = concept_drift_summaries(conn, top=top, min_support=min_support)
             return {"drift": [drift_summary_to_dict(conn, i) for i in items]}
 
     @app.get("/distill")
     def distill(top: int = 10) -> dict:
-        with _conn() as conn:
+        with open_store() as conn:
             items = distilled_summaries(conn, top=top)
             return {
                 "distilled": [distilled_summary_to_dict(i) for i in items],
@@ -313,7 +284,7 @@ def create_app(*, allowed_hosts: Sequence[str] | None = None):
     def usage(top: int = 10) -> dict:
         from crossmodalrag.config import usage_tracking_enabled
 
-        with _conn() as conn:
+        with open_store() as conn:
             total = conn.execute("SELECT COUNT(*) AS n FROM usage_events").fetchone()["n"]
             by_type = conn.execute(
                 "SELECT event_type, COUNT(*) AS n FROM usage_events GROUP BY event_type ORDER BY event_type"

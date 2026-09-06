@@ -157,3 +157,41 @@ def test_doctor_text_runs(monkeypatch, capsys, tmp_path):
     _run(monkeypatch, ["doctor"])
     out = capsys.readouterr().out
     assert "doctor" in out and "Ollama: reachable=False" in out
+
+
+# --- mem mcp: the stdio MCP server entry point ----------------------------------
+
+
+def test_mcp_cmd_refuses_missing_db(tmp_path, monkeypatch, capsys):
+    """A client-spawned server has an arbitrary cwd; a missing DB must fail loudly, not be created."""
+    missing = tmp_path / "nope" / "memory.db"
+    with pytest.raises(cli.CLIError, match=str(missing)):
+        cli.mcp_cmd(db=str(missing))
+    assert not missing.exists()
+    assert capsys.readouterr().out == ""
+
+
+def test_mcp_cmd_missing_extra_is_clierror(tmp_path, monkeypatch):
+    from crossmodalrag.db import connect, init_db
+
+    db = tmp_path / "memory.db"
+    init_db(connect(db))
+    monkeypatch.setitem(sys.modules, "mcp", None)  # `import mcp` now raises ModuleNotFoundError
+    with pytest.raises(cli.CLIError, match=r"\[mcp\]"):
+        cli.mcp_cmd(db=str(db))
+
+
+def test_mcp_cmd_runs_server_with_stdout_untouched(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("mcp")
+    import crossmodalrag.mcp_server as mcp_server
+    from crossmodalrag.db import connect, init_db
+
+    db = tmp_path / "memory.db"
+    init_db(connect(db))
+    calls = []
+    monkeypatch.setattr(mcp_server, "run_stdio", lambda **kw: calls.append(kw))
+    _run(monkeypatch, ["mcp", "--db", str(db)])
+    assert calls == [{"db_path": db.resolve()}]
+    out, err = capsys.readouterr()
+    assert out == ""  # stdout is the protocol channel
+    assert str(db) in err

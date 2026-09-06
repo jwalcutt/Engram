@@ -212,7 +212,9 @@ def test_cli_eval_json(built_db, monkeypatch, capsys):
 
 def test_cli_recall_json_offline(built_db, monkeypatch, capsys):
     # Force the deterministic fallback (no Ollama) so the recall JSON path runs offline.
-    monkeypatch.setattr(cli, "get_default_llm_provider", lambda *a, **k: None)
+    import crossmodalrag.service as svc
+
+    monkeypatch.setattr(svc, "get_default_llm_provider", lambda *a, **k: None)
     payload = _run_json(monkeypatch, capsys, ["recall", "--level", "concept", "--json"])
     assert payload["level"] == "concept"
     assert payload["recall"] and payload["recall"][0]["generated_by"] == "fallback"
@@ -272,3 +274,56 @@ def test_stored_evidence_shape_matches_ask_contract():
         evidence=[hit], abstained=False, model="stub", id_map={"E1": hit},
     )
     assert generated_answer_to_dict(gen)["evidence"] == evidence_payload(gen)
+
+
+# --- service layer: one envelope per read view, shared by CLI, API and MCP -------------------
+
+
+def _service_payload(name: str, **kwargs) -> dict:
+    import crossmodalrag.service as svc
+
+    with svc.open_store() as conn:
+        return getattr(svc, f"{name}_payload")(conn, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("name", "kwargs", "argv"),
+    [
+        ("concepts", {"top": 20}, ["concepts", "--json"]),
+        ("timeline", {"limit": 50}, ["timeline", "--json"]),
+        ("forgetting", {"level": "concept"}, ["forgetting", "--level", "concept", "--json"]),
+        ("recall", {"level": "concept"}, ["recall", "--level", "concept", "--json"]),
+    ],
+)
+def test_service_payloads_match_cli_json(built_db, monkeypatch, capsys, name, kwargs, argv):
+    """The CLI renders the service envelope verbatim: one source of truth per contract."""
+    from datetime import datetime, timezone
+
+    import crossmodalrag.service as svc
+
+    monkeypatch.setattr(svc, "get_default_llm_provider", lambda *a, **k: None)  # offline recall
+    # Forgetting/recall scores decay with the clock; freeze it so both calls see the same instant.
+    monkeypatch.setattr(svc, "_now", lambda: datetime(2026, 3, 1, tzinfo=timezone.utc))
+    assert _service_payload(name, **kwargs) == _run_json(monkeypatch, capsys, argv)
+
+
+def test_forgetting_and_recall_payloads_reject_unknown_level(built_db):
+    with pytest.raises(ValueError, match="bogus"):
+        _service_payload("forgetting", level="bogus")
+    with pytest.raises(ValueError, match="bogus"):
+        _service_payload("recall", level="bogus")
+
+
+def test_open_store_inits_schema(tmp_path, monkeypatch):
+    import crossmodalrag.service as svc
+
+    db_path = tmp_path / "fresh" / "memory.db"
+    monkeypatch.setenv("CMRAG_DB_PATH", str(db_path))
+    with svc.open_store() as conn:
+        tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"sources", "evidence_chunks", "memory_nodes"} <= tables
+    assert db_path.exists()
+
+    explicit = tmp_path / "explicit.db"
+    with svc.open_store(explicit) as conn:
+        assert conn.execute("PRAGMA database_list").fetchone()["file"] == str(explicit)
