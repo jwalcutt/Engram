@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
 
 from crossmodalrag.config import (
     CONNECTOR_ENV_PREFIX,
@@ -19,6 +23,7 @@ from crossmodalrag.config import (
     get_llm_base_url,
     get_llm_model,
     get_llm_timeout,
+    get_usage_halflife_days,
     load_config,
 )
 from crossmodalrag.db import connect, init_db
@@ -26,7 +31,11 @@ from crossmodalrag.embed.provider import get_default_provider
 from crossmodalrag.generate.answer import generated_answer_to_dict, template_answer_to_dict
 from crossmodalrag.generate.provider import LLMUnavailable, get_default_llm_provider
 from crossmodalrag.generate.synthesize import synthesize_answer, synthesize_answer_stream
+from crossmodalrag.memory.concepts import list_concept_views
+from crossmodalrag.memory.episodes import list_episode_timeline
+from crossmodalrag.memory.forgetting import LEVEL_NAMES, compute_forgetting_risk, forgetting_risk_to_dict
 from crossmodalrag.memory.integrity import memory_stats
+from crossmodalrag.memory.recall import generate_recall_cards, recall_card_to_dict
 from crossmodalrag.retrieve.hybrid import DEFAULT_PROFILE, retrieve
 from crossmodalrag.retrieve.nodes import candidate_chunk_ids, retrieve_nodes
 from crossmodalrag.retrieve.rerank import resolve_source_types
@@ -203,6 +212,97 @@ def stream_answer_events(
     yield {"type": "answer", "data": data}
 
 
+@contextmanager
+def open_store(db_path: Path | None = None) -> Iterator[sqlite3.Connection]:
+    """Open the memory DB (default: the configured path), apply the idempotent schema, close on exit.
+
+    Every thin client opens one connection per request/tool call through this, so sqlite handles
+    never cross threads. ``connect`` creates a missing file; callers that must not do that (an MCP
+    server spawned in an arbitrary directory) check ``path.exists()`` first.
+    """
+    conn = connect(db_path if db_path is not None else get_db_path())
+    try:
+        init_db(conn)
+        yield conn
+    finally:
+        conn.close()
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _levels(level: str) -> tuple[int, ...]:
+    levels = LEVEL_NAMES.get(level)
+    if levels is None:
+        raise ValueError(f"Unknown level '{level}'. Expected one of: {', '.join(LEVEL_NAMES)}.")
+    return levels
+
+
+def concepts_payload(conn: sqlite3.Connection, *, top: int = 20) -> dict:
+    """The `mem concepts --json` contract (shared by GET /concepts and the MCP `concepts` tool)."""
+    return {"concepts": list_concept_views(conn, top=top)}
+
+
+def timeline_payload(conn: sqlite3.Connection, *, limit: int = 50) -> dict:
+    """The `mem timeline --json` contract (GET /timeline, MCP `timeline`)."""
+    return {"timeline": list_episode_timeline(conn, limit=limit)}
+
+
+def forgetting_payload(
+    conn: sqlite3.Connection,
+    *,
+    level: str = "concept",
+    top: int = 10,
+    min_support: int = 1,
+    now: datetime | None = None,
+) -> dict:
+    """The `mem forgetting --json` contract. ``now`` is injectable for frozen-clock reproducibility.
+
+    Raises ``ValueError`` for a level outside ``LEVEL_NAMES``.
+    """
+    items = compute_forgetting_risk(
+        conn,
+        now=now if now is not None else _now(),
+        halflife_days=get_usage_halflife_days(),
+        levels=_levels(level),
+        min_support=min_support,
+        top=top,
+    )
+    return {"level": level, "forgetting": [forgetting_risk_to_dict(i) for i in items]}
+
+
+def recall_payload(
+    conn: sqlite3.Connection,
+    *,
+    level: str = "concept",
+    top: int = 10,
+    min_support: int = 1,
+    regenerate: bool = False,
+    now: datetime | None = None,
+) -> dict:
+    """The `mem recall --json` contract.
+
+    Cards come from the extraction model (``CMRAG_EXTRACT_MODEL``) when Ollama is reachable and
+    from the deterministic fallback otherwise; either way they are cached in ``recall_cards``
+    (a derived, fingerprint-keyed cache, never ingestion or history state). Raises ``ValueError``
+    for an unknown level.
+    """
+    levels = _levels(level)
+    provider = get_default_llm_provider(get_extract_model())
+    cards = generate_recall_cards(
+        conn,
+        provider,
+        now=now if now is not None else _now(),
+        halflife_days=get_usage_halflife_days(),
+        levels=levels,
+        top=top,
+        min_support=min_support,
+        regenerate=regenerate,
+    )
+    return {"level": level, "recall": [recall_card_to_dict(c) for c in cards]}
+
+
 class ConversationNotFound(LookupError):
     """Raised when a chat turn or read targets a conversation id that doesn't exist."""
 
@@ -358,14 +458,15 @@ def ping_ollama() -> bool:
         return False
 
 
-def health_report() -> dict:
+def health_report(db_path: Path | None = None) -> dict:
     """Read-only health report: DB, installed extras, Ollama reachability, models, config, memory.
 
-    The payload behind `mem doctor` and the API `/health` endpoint.
+    The payload behind `mem doctor`, the API `/health` endpoint and the MCP `status` tool. ``db_path``
+    names the store to report on; ``None`` means the configured one.
     """
     from crossmodalrag.capabilities import has_ocr, has_pdf
 
-    db_path = get_db_path()
+    db_path = db_path if db_path is not None else get_db_path()
     db_exists = db_path.exists()
     provider = get_default_provider()
     embed_model = provider.name if provider is not None else None

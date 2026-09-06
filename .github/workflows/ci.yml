@@ -43,7 +43,7 @@ jobs:
       - name: Install package and test extras
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[ui,pdf,ocr,dev]"
+          python -m pip install -e ".[ui,pdf,ocr,mcp,dev]"
 
       - name: Lint
         run: ruff check .

@@ -950,34 +950,17 @@ def usage_cmd(clear: bool = False, top: int = 10, as_json: bool = False) -> None
 
 
 def forgetting_cmd(level: str = "concept", top: int = 10, min_support: int = 1, as_json: bool = False) -> None:
-    from datetime import datetime, timezone
-
-    from crossmodalrag.config import get_usage_halflife_days
-    from crossmodalrag.memory.forgetting import (
-        LEVEL_NAMES,
-        compute_forgetting_risk,
-        forgetting_risk_to_dict,
-    )
+    from crossmodalrag.service import forgetting_payload, open_store
 
     db_path = get_db_path()
-    conn = connect(db_path)
-    try:
-        init_db(conn)
-        items = compute_forgetting_risk(
-            conn,
-            now=datetime.now(timezone.utc),
-            halflife_days=get_usage_halflife_days(),
-            levels=LEVEL_NAMES[level],
-            min_support=min_support,
-            top=top,
-        )
-    finally:
-        conn.close()
+    with open_store(db_path) as conn:
+        payload = forgetting_payload(conn, level=level, top=top, min_support=min_support)
 
     if as_json:
-        print(json.dumps({"level": level, "forgetting": [forgetting_risk_to_dict(i) for i in items]}, indent=2))
+        print(json.dumps(payload, indent=2))
         return
 
+    items = payload["forgetting"]
     print(f"Forgetting risk (level={level}) — DB: {db_path}")
     if not items:
         print(
@@ -987,14 +970,14 @@ def forgetting_cmd(level: str = "concept", top: int = 10, min_support: int = 1, 
         return
     print("What you're most likely forgetting (important but not recently revisited):")
     for item in items:
-        title = item.title or "untitled"
+        title = item["title"] or "untitled"
         print(
-            f"  [risk={item.risk:.3f}] L{item.level} {item.node_type}: {title}\n"
-            f"      importance={item.importance:.3f} staleness={item.staleness:.3f} "
-            f"confidence={item.confidence:.3f} (support={item.support}, last_touch={item.last_touch})"
+            f"  [risk={item['risk']:.3f}] L{item['level']} {item['node_type']}: {title}\n"
+            f"      importance={item['importance']:.3f} staleness={item['staleness']:.3f} "
+            f"confidence={item['confidence']:.3f} (support={item['support']}, last_touch={item['last_touch']})"
         )
-        if item.evidence_source_uris:
-            print(f"      evidence: {', '.join(item.evidence_source_uris)}")
+        if item["evidence_source_uris"]:
+            print(f"      evidence: {', '.join(item['evidence_source_uris'])}")
 
 
 def drift_cmd(top: int = 10, min_support: int = 1, as_json: bool = False) -> None:
@@ -1085,34 +1068,17 @@ def recall_cmd(
     regenerate: bool = False,
     as_json: bool = False,
 ) -> None:
-    from datetime import datetime, timezone
-
-    from crossmodalrag.config import get_usage_halflife_days
-    from crossmodalrag.memory.forgetting import LEVEL_NAMES
-    from crossmodalrag.memory.recall import generate_recall_cards, recall_card_to_dict
+    from crossmodalrag.service import open_store, recall_payload
 
     db_path = get_db_path()
-    provider = get_default_llm_provider(get_extract_model())
-    conn = connect(db_path)
-    try:
-        init_db(conn)
-        cards = generate_recall_cards(
-            conn,
-            provider,
-            now=datetime.now(timezone.utc),
-            halflife_days=get_usage_halflife_days(),
-            levels=LEVEL_NAMES[level],
-            top=top,
-            min_support=min_support,
-            regenerate=regenerate,
-        )
-    finally:
-        conn.close()
+    with open_store(db_path) as conn:
+        payload = recall_payload(conn, level=level, top=top, min_support=min_support, regenerate=regenerate)
 
     if as_json:
-        print(json.dumps({"level": level, "recall": [recall_card_to_dict(c) for c in cards]}, indent=2))
+        print(json.dumps(payload, indent=2))
         return
 
+    cards = payload["recall"]
     print(f"Active-recall cards (level={level}) — DB: {db_path}")
     if not cards:
         print(
@@ -1122,29 +1088,25 @@ def recall_cmd(
         return
     print("Quiz yourself on what you're most likely forgetting:")
     for card in cards:
-        title = card.title or "untitled"
-        print(f"  [risk={card.risk:.3f} | {card.generated_by}] L{card.level} {card.node_type}: {title}")
-        print(f"      Q: {card.question}")
-        if card.answer:
-            print(f"      A: {card.answer}")
-        if card.evidence_source_uris:
-            print(f"      evidence: {', '.join(card.evidence_source_uris)}")
+        title = card["title"] or "untitled"
+        print(f"  [risk={card['risk']:.3f} | {card['generated_by']}] L{card['level']} {card['node_type']}: {title}")
+        print(f"      Q: {card['question']}")
+        if card["answer"]:
+            print(f"      A: {card['answer']}")
+        if card["evidence_source_uris"]:
+            print(f"      evidence: {', '.join(card['evidence_source_uris'])}")
 
 
 def concepts_cmd(top: int = 20, as_json: bool = False) -> None:
-    from crossmodalrag.memory.concepts import list_concept_views
+    from crossmodalrag.service import concepts_payload, open_store
 
-    db_path = get_db_path()
-    conn = connect(db_path)
-    try:
-        init_db(conn)
-        items = list_concept_views(conn, top=top)
-    finally:
-        conn.close()
+    with open_store(get_db_path()) as conn:
+        payload = concepts_payload(conn, top=top)
 
     if as_json:
-        print(json.dumps({"concepts": items}, indent=2))
+        print(json.dumps(payload, indent=2))
         return
+    items = payload["concepts"]
     if not items:
         print("No concepts yet. Run `mem build-memory` (needs the embeddings extra).")
         return
@@ -1157,19 +1119,15 @@ def concepts_cmd(top: int = 20, as_json: bool = False) -> None:
 
 
 def timeline_cmd(limit: int = 50, as_json: bool = False) -> None:
-    from crossmodalrag.memory.episodes import list_episode_timeline
+    from crossmodalrag.service import open_store, timeline_payload
 
-    db_path = get_db_path()
-    conn = connect(db_path)
-    try:
-        init_db(conn)
-        items = list_episode_timeline(conn, limit=limit)
-    finally:
-        conn.close()
+    with open_store(get_db_path()) as conn:
+        payload = timeline_payload(conn, limit=limit)
 
     if as_json:
-        print(json.dumps({"timeline": items}, indent=2))
+        print(json.dumps(payload, indent=2))
         return
+    items = payload["timeline"]
     if not items:
         print("No episodes yet. Run `mem build-memory`.")
         return
@@ -1416,6 +1374,34 @@ def serve_cmd(host: str = "127.0.0.1", port: int = 8765) -> None:
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
+def mcp_cmd(db: str | None = None) -> None:
+    """Serve the read-only memory tools over stdio for an MCP client (requires the `[mcp]` extra).
+
+    stdout is the protocol channel, so nothing here prints to it. The client that spawns this
+    process picks the working directory, so the database is resolved up front and a missing file
+    is refused rather than silently created somewhere unexpected.
+    """
+    from crossmodalrag.mcp_server import resolve_db_path
+
+    db_path = resolve_db_path(Path(db) if db else None)
+    if not db_path.exists():
+        raise CLIError(
+            f"No memory database at {db_path}. Pass `--db /path/to/memory.db` (or set CMRAG_DB_PATH) in "
+            "the MCP client configuration; a client-spawned server does not run from your project directory."
+        )
+    try:
+        import mcp  # noqa: F401
+    except ModuleNotFoundError as exc:
+        raise CLIError(
+            "`mem mcp` requires the [mcp] extra. Run: pip install -e \".[mcp]\""
+        ) from exc
+
+    from crossmodalrag.mcp_server import run_stdio
+
+    print(f"Engram MCP server: serving {db_path} over stdio (read-only).", file=sys.stderr)
+    run_stdio(db_path=db_path)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Engram local memory CLI.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1466,6 +1452,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_serve.add_argument("--host", default="127.0.0.1", help="Bind host (default 127.0.0.1 / loopback).")
     p_serve.add_argument("--port", type=int, default=8765, help="Bind port (default 8765).")
+
+    p_mcp = sub.add_parser(
+        "mcp",
+        help="Serve the read-only memory tools to an AI assistant over stdio (Model Context Protocol; "
+        "requires the [mcp] extra; no network listener).",
+    )
+    p_mcp.add_argument(
+        "--db",
+        default=None,
+        help="Memory DB to serve (default: CMRAG_DB_PATH or ./data/memory.db). Set it here or in the "
+        "client's env: the client chooses the working directory, not you.",
+    )
 
     p_notes = sub.add_parser(
         "ingest-notes",
@@ -1900,6 +1898,9 @@ def _dispatch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None
         return
     if args.command == "serve":
         serve_cmd(host=args.host, port=args.port)
+        return
+    if args.command == "mcp":
+        mcp_cmd(db=args.db)
         return
     if args.command == "ingest-notes":
         vault_paths = _resolve_ingest_paths(
